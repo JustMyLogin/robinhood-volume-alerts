@@ -6,6 +6,8 @@ import { buildSnapshot } from './context.js'
 import type { EmitAlert } from './detector.js'
 
 const SMA_PERIOD = 9
+/** Only evaluate tokens younger than this — the "new token" breakout case. */
+const MAX_AGE_MINUTES = 120
 
 /** Simple moving average of the trailing SMA_PERIOD values. */
 function sma(values: number[]): number | null {
@@ -18,6 +20,10 @@ function sma(values: number[]): number | null {
  * SMA9 crossover detector: fires when a token's minute close crosses above
  * its own trailing 9-minute close SMA on the same minute its volume is
  * above its own 9-minute volume SMA — breakout with volume confirmation.
+ *
+ * Restricted to tokens younger than MAX_AGE_MINUTES: older, established
+ * tokens chopping around their SMA are noise for this signal, which is
+ * meant to catch early breakouts on new launches.
  *
  * Runs on the same 15s tick as the spike detector, over closed minute
  * buckets only, so the SMA and the bar it is judged against never move
@@ -48,18 +54,19 @@ export class SmaCrossDetector {
     }
   }
 
-private async evaluateToken(token: string, nowS: number, nowMinute: number): Promise<void> {
-  // Only alert on tokens younger than 1 hour
-  const row = this.store.getToken(token)
-  if (row?.firstSeenS != null) {
-    const ageS = nowS - row.firstSeenS
-    if (ageS >= 3600) return          // older than 1 hour → skip
-  } else {
-    // No first-seen record yet → treat as too new / unknown, skip for safety
-    // (or remove this else if you prefer to allow them)
-    return
+  /** Token's recorded first-seen minute, falling back to its earliest stored bucket. */
+  private firstSeenMinute(token: string): number | null {
+    const row = this.store.getToken(token)
+    if (row?.firstSeenS != null) return Math.floor(row.firstSeenS / 60)
+    return this.store.earliestBucketMinute(token)
   }
-  const closedMinute = nowMinute - 1
+
+  private async evaluateToken(token: string, nowS: number, nowMinute: number): Promise<void> {
+    const closedMinute = nowMinute - 1
+
+    const firstSeen = this.firstSeenMinute(token)
+    if (firstSeen === null || closedMinute - firstSeen > MAX_AGE_MINUTES) return
+
     const fromMinute = closedMinute - SMA_PERIOD
     const buckets = this.store.getBuckets(token, fromMinute, closedMinute)
 
