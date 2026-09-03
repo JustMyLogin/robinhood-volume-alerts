@@ -627,7 +627,6 @@ export class TelegramAlertBot {
       case 'performance':
         return true
     }
-    }
   }
 
   private enqueue(task: () => Promise<void>): void {
