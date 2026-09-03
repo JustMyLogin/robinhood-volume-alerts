@@ -243,5 +243,11 @@ export function renderAlertHtml(alert: Alert): string {
         footer(alert, defaultLinks(alert.token)),
       ].join('\n')
     }
+          default: {
+      // Exhaustiveness check — if a new AlertKind is added and forgotten here,
+      // TypeScript will error on the `never` assignment.
+      const _exhaustive: never = alert
+      return String(_exhaustive)
+    }
   }
 }
