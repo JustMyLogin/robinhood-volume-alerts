@@ -192,6 +192,19 @@ export function renderAlertHtml(alert: Alert): string {
       ].join('\n')
     }
 
+    case 'sma_cross': {
+      const head = `\u{1F3AF} ${title(alert)}`
+      const line = `<b>Crossed above SMA9</b> · ${fmtPrice(alert.closePrice)} vs SMA ${fmtPrice(
+        alert.sma9,
+      )} · Robinhood`
+      const vol = `Volume ${fmtUsd(alert.volumeUsd)} vs SMA9 ${fmtUsd(alert.volumeSma9)}`
+      return [
+        `${head}\n${line}`,
+        `${block(statLines(alert.context, [vol]))}${warning}`,
+        footer(alert, defaultLinks(alert.token)),
+      ].join('\n')
+    }
+
     case 'liquidity_pull': {
       const head = `\u{1F6A8} <b>Liquidity pulled</b> ${title(alert)}`
       const line = `<b>-${alert.droppedPct.toFixed(1)}%</b> · ${fmtUsd(alert.beforeUsd)} to ${fmtUsd(
