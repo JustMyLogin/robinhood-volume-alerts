@@ -48,8 +48,18 @@ export class SmaCrossDetector {
     }
   }
 
-  private async evaluateToken(token: string, nowS: number, nowMinute: number): Promise<void> {
-    const closedMinute = nowMinute - 1
+private async evaluateToken(token: string, nowS: number, nowMinute: number): Promise<void> {
+  // Only alert on tokens younger than 1 hour
+  const row = this.store.getToken(token)
+  if (row?.firstSeenS != null) {
+    const ageS = nowS - row.firstSeenS
+    if (ageS >= 3600) return          // older than 1 hour → skip
+  } else {
+    // No first-seen record yet → treat as too new / unknown, skip for safety
+    // (or remove this else if you prefer to allow them)
+    return
+  }
+  const closedMinute = nowMinute - 1
     const fromMinute = closedMinute - SMA_PERIOD
     const buckets = this.store.getBuckets(token, fromMinute, closedMinute)
 
