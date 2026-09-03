@@ -8,6 +8,7 @@ export const ALERT_KINDS = [
   'liquidity_pull',
   'wallet_trade',
   'performance',
+  'sma_cross',
 ] as const
 
 export type AlertKind = (typeof ALERT_KINDS)[number]
@@ -26,6 +27,7 @@ export const KIND_LABELS: Record<AlertKind, string> = {
   liquidity_pull: 'Rug warnings',
   wallet_trade: 'Watched wallets',
   performance: 'Alert follow-ups',
+  sma_cross: 'SMA9 crossover',
 }
 
 /** One-line explanations shown in the alert-type panel. */
@@ -38,6 +40,7 @@ export const KIND_DESCRIPTIONS: Record<AlertKind, string> = {
   liquidity_pull: 'pooled liquidity drops sharply, the rug early warning',
   wallet_trade: 'a wallet on your watchlist trades',
   performance: 'a token you were alerted on hits 2x, 5x, 10x and beyond',
+  sma_cross: 'price crosses above its 9-minute SMA on above-average volume',
 }
 
 /** Market context attached to every alert, each field degrading to null. */
@@ -122,6 +125,15 @@ export interface PriceMoveAlert extends BaseAlert {
   toUsd: number
 }
 
+/** Close crossed above its 9-minute SMA on above-average volume. */
+export interface SmaCrossAlert extends BaseAlert {
+  kind: 'sma_cross'
+  closePrice: number
+  sma9: number
+  volumeUsd: number
+  volumeSma9: number
+}
+
 /** Pooled liquidity dropped sharply: the rug early warning. */
 export interface LiquidityPullAlert extends BaseAlert {
   kind: 'liquidity_pull'
@@ -167,6 +179,7 @@ export type Alert =
   | LiquidityPullAlert
   | WalletTradeAlert
   | PerformanceAlert
+  | SmaCrossAlert
 
 /**
  * Alerts that only concern a specific set of chats (rather than everyone who
@@ -196,5 +209,7 @@ export function fingerprint(alert: Alert): string {
       return `wallet:${alert.wallet}:${alert.txHash}`
     case 'performance':
       return `perf:${alert.token}:${alert.milestone}:${alert.at}`
+    case 'sma_cross':
+      return `sma:${alert.token}:${Math.floor(alert.at / 1800)}`
   }
 }
