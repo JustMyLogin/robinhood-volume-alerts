@@ -18,6 +18,7 @@ import { TelegramAlertBot } from './telegram/bot.js'
 import { renderAlertHtml } from './telegram/format.js'
 import { logger } from './logger.js'
 import { SmaCrossDetector } from './engine/smaCross.js'
+import { AccumulationDetector } from './engine/accumulation.js'
 
 /** Blocks per minute at the chain's ~100ms cadence, used to size the backfill. */
 const BLOCKS_PER_MINUTE = 600n
@@ -67,6 +68,7 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
   const liquidity = new LiquidityMonitor(client, store, ethPrice, meta, enricher, cfg.defaults.rugDropPct, emit)
   const launchpads = new LaunchpadDetectors(client, store, meta, emit)
   const smaCross = new SmaCrossDetector(store, meta, enricher, emit)
+  const accumulation = new AccumulationDetector(store, meta, enricher, emit)
 
   const head = await client.public.getBlockNumber()
   const backfillBlocks = BigInt(cfg.backfillMinutes) * BLOCKS_PER_MINUTE
@@ -108,7 +110,11 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
       .then(() => {
         if (!spike.live) return
         const tokens = tracker.activeTokens(nowS, 300)
-        return Promise.all([priceMoves.evaluate(tokens, nowS), smaCross.evaluate(tokens, nowS)])
+        return Promise.all([
+          priceMoves.evaluate(tokens, nowS),
+          smaCross.evaluate(tokens, nowS),
+          accumulation.evaluate(tokens, nowS),
+        ])
       })
       .catch((err) => logger.error({ err: String(err) }, 'detector tick failed'))
   }, cfg.evalIntervalS * 1000)
@@ -133,6 +139,7 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
         graduations: launchpads.graduations,
         milestones: performance.milestonesEmitted,
         smaCrosses: smaCross.alerts,
+        accumulations: accumulation.alerts,
       },
       'pipeline stats',
     )
