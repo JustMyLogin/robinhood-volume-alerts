@@ -6,6 +6,7 @@ import { logger } from '../logger.js'
 import { computeBaseline } from './baseline.js'
 import { buildSnapshot } from './context.js'
 import type { Alert, SpikeAlert } from './events.js'
+import { MAX_NEW_TOKEN_AGE_MINUTES, firstSeenMinute } from './tokenAge.js'
 import type { VolumeTracker } from './window.js'
 
 /** Emitter shared by every detector. */
@@ -15,14 +16,15 @@ export type EmitAlert = (alert: Alert) => Promise<void>
  * The volume-spike detector. Each tick it flushes closed minute buckets, then
  * for every token that traded in the last 60 seconds:
  *
- * 1. aggregates the rolling 60s window (volume, swaps, buys/sells, prices);
- * 2. learns the token's normal minute from the trailing closed buckets,
+ * 1. skips tokens older than MAX_NEW_TOKEN_AGE_MINUTES;
+ * 2. aggregates the rolling 60s window (volume, swaps, buys/sells, prices);
+ * 3. learns the token's normal minute from the trailing closed buckets,
  *    excluding the two minutes the rolling window can overlap, top-trimmed
  *    so earlier spikes do not inflate "normal";
- * 3. gates on the loosest thresholds any subscriber holds (per-chat gating
+ * 4. gates on the loosest thresholds any subscriber holds (per-chat gating
  *    happens at delivery), plus a per-token re-alert guard so one sustained
  *    spike produces one alert, not one per tick;
- * 4. enriches survivors and hands the finished {@link SpikeAlert} onward.
+ * 5. enriches survivors and hands the finished {@link SpikeAlert} onward.
  */
 export class SpikeDetector {
   /** Per-token: last alerted-at seconds and the multiple it fired with. */
@@ -87,6 +89,12 @@ export class SpikeDetector {
     nowMinute: number,
     gates: { spikeX: number; minVolumeUsd: number; minSwaps: number },
   ): Promise<void> {
+    // New-tokens-only: skip anything older than the age cap before doing
+    // any other work. `firstSeen` is also reused below to clamp the
+    // baseline window, so this is not a wasted lookup either way.
+    const firstSeen = firstSeenMinute(this.store, token)
+    if (firstSeen === null || nowMinute - firstSeen > MAX_NEW_TOKEN_AGE_MINUTES) return
+
     const rolling = this.tracker.rolling(token, nowS)
     if (!rolling || rolling.volumeUsd < gates.minVolumeUsd || rolling.swaps < gates.minSwaps) return
 
@@ -94,8 +102,7 @@ export class SpikeDetector {
     // rolling 60s window can straddle.
     const toMinute = nowMinute - 2
     let fromMinute = toMinute - this.cfg.baselineMinutes + 1
-    const firstSeen = this.firstSeenMinute(token)
-    if (firstSeen !== null && firstSeen > fromMinute) fromMinute = firstSeen
+    if (firstSeen > fromMinute) fromMinute = firstSeen
     if (toMinute - fromMinute + 1 < 3) return // under 3 minutes of history: nothing to compare against
 
     const buckets = this.store.getBuckets(token, fromMinute, toMinute)
@@ -137,11 +144,5 @@ export class SpikeDetector {
     this.recentAlerts.set(token, { at: nowS, multiple })
     this.alertsEmitted++
     await this.emit(alert)
-  }
-
-  private firstSeenMinute(token: string): number | null {
-    const row = this.store.getToken(token)
-    if (row?.firstSeenS != null) return Math.floor(row.firstSeenS / 60)
-    return this.store.earliestBucketMinute(token)
   }
 }
