@@ -205,6 +205,20 @@ export function renderAlertHtml(alert: Alert): string {
       ].join('\n')
     }
 
+    case 'accumulation': {
+      const head = `\u{1F440} ${title(alert)}`
+      const pct = Math.round(alert.buyRatio * 100)
+      const line = `<b>Buy pressure building</b> · ${pct}% buys · ${fmtMult(
+        alert.volumeTrendMultiple,
+      )} volume trend · Robinhood`
+      const extra = `Range ${alert.priceRangePct.toFixed(1)}% over ${alert.windowMinutes}m  Volume ${fmtUsd(alert.volumeUsd)}`
+      return [
+        `${head}\n${line}`,
+        `${block(statLines(alert.context, [extra]))}${warning}`,
+        footer(alert, defaultLinks(alert.token)),
+      ].join('\n')
+    }
+
     case 'liquidity_pull': {
       const head = `\u{1F6A8} <b>Liquidity pulled</b> ${title(alert)}`
       const line = `<b>-${alert.droppedPct.toFixed(1)}%</b> · ${fmtUsd(alert.beforeUsd)} to ${fmtUsd(
