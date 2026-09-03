@@ -613,6 +613,10 @@ export class TelegramAlertBot {
         return watched || Math.abs(alert.pct) >= chat.priceMovePct
       case 'liquidity_pull':
         return watched || alert.droppedPct >= chat.rugDropPct
+      case 'sma_cross':
+        // No extra thresholds — the detector already required the crossover + volume confirmation.
+        // Still respect the new-token gate and the watched-token bypass above.
+        return true
       case 'launch':
       case 'graduation':
       case 'wallet_trade':
