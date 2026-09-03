@@ -617,11 +617,16 @@ export class TelegramAlertBot {
         // No extra thresholds — the detector already required the crossover + volume confirmation.
         // Still respect the new-token gate and the watched-token bypass above.
         return true
+      case 'accumulation':
+        // Same reasoning as sma_cross: the detector's own thresholds (buy ratio,
+        // volume trend, baseline comparison) already do the filtering.
+        return true
       case 'launch':
       case 'graduation':
       case 'wallet_trade':
       case 'performance':
         return true
+    }
     }
   }
 
