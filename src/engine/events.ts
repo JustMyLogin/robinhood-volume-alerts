@@ -9,6 +9,7 @@ export const ALERT_KINDS = [
   'wallet_trade',
   'performance',
   'sma_cross',
+  'accumulation',
 ] as const
 
 export type AlertKind = (typeof ALERT_KINDS)[number]
@@ -28,6 +29,7 @@ export const KIND_LABELS: Record<AlertKind, string> = {
   wallet_trade: 'Watched wallets',
   performance: 'Alert follow-ups',
   sma_cross: 'SMA9 crossover',
+  accumulation: 'Accumulation warning',
 }
 
 /** One-line explanations shown in the alert-type panel. */
@@ -41,6 +43,7 @@ export const KIND_DESCRIPTIONS: Record<AlertKind, string> = {
   wallet_trade: 'a wallet on your watchlist trades',
   performance: 'a token you were alerted on hits 2x, 5x, 10x and beyond',
   sma_cross: 'price crosses above its 9-minute SMA on above-average volume',
+  accumulation: 'buy pressure and volume building while price is still flat, a lead-up before a move',
 }
 
 /** Market context attached to every alert, each field degrading to null. */
@@ -134,6 +137,24 @@ export interface SmaCrossAlert extends BaseAlert {
   volumeSma9: number
 }
 
+/**
+ * Buy pressure and volume building while price is still range-bound: a
+ * lead-up pattern that often precedes a move, rather than confirmation that
+ * one has started (see {@link SpikeAlert} / {@link SmaCrossAlert} for that).
+ */
+export interface AccumulationAlert extends BaseAlert {
+  kind: 'accumulation'
+  /** Fraction of swaps in the window that were buys, 0 to 1. */
+  buyRatio: number
+  /** Total USD volume across the window. */
+  volumeUsd: number
+  /** Second-half volume divided by first-half volume within the window. */
+  volumeTrendMultiple: number
+  /** (max close - min close) / mean close over the window, as a percent. */
+  priceRangePct: number
+  windowMinutes: number
+}
+
 /** Pooled liquidity dropped sharply: the rug early warning. */
 export interface LiquidityPullAlert extends BaseAlert {
   kind: 'liquidity_pull'
@@ -180,6 +201,7 @@ export type Alert =
   | WalletTradeAlert
   | PerformanceAlert
   | SmaCrossAlert
+  | AccumulationAlert
 
 /**
  * Alerts that only concern a specific set of chats (rather than everyone who
@@ -211,5 +233,7 @@ export function fingerprint(alert: Alert): string {
       return `perf:${alert.token}:${alert.milestone}:${alert.at}`
     case 'sma_cross':
       return `sma:${alert.token}:${Math.floor(alert.at / 1800)}`
+    case 'accumulation':
+      return `accum:${alert.token}:${Math.floor(alert.at / 3600)}`
   }
 }
