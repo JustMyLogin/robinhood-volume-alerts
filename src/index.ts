@@ -17,6 +17,8 @@ import type { Alert } from './engine/events.js'
 import { TelegramAlertBot } from './telegram/bot.js'
 import { renderAlertHtml } from './telegram/format.js'
 import { logger } from './logger.js'
+import { LaunchpadDetectors, LiquidityMonitor, PriceMoveDetector, TradeDetectors } from './engine/detectors.js'
+import { SmaCrossDetector } from './engine/smaCross.js'
 
 /** Blocks per minute at the chain's ~100ms cadence, used to size the backfill. */
 const BLOCKS_PER_MINUTE = 600n
@@ -65,6 +67,8 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
   const priceMoves = new PriceMoveDetector(store, meta, enricher, cfg.defaults.priceMovePct, emit)
   const liquidity = new LiquidityMonitor(client, store, ethPrice, meta, enricher, cfg.defaults.rugDropPct, emit)
   const launchpads = new LaunchpadDetectors(client, store, meta, emit)
+  const priceMoves = new PriceMoveDetector(store, meta, enricher, cfg.defaults.priceMovePct, emit)
+  const smaCross = new SmaCrossDetector(store, meta, enricher, emit)
 
   const head = await client.public.getBlockNumber()
   const backfillBlocks = BigInt(cfg.backfillMinutes) * BLOCKS_PER_MINUTE
@@ -103,7 +107,11 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
     const nowS = Math.floor(Date.now() / 1000)
     void spike
       .tick(nowS)
-      .then(() => (spike.live ? priceMoves.evaluate(tracker.activeTokens(nowS, 300), nowS) : undefined))
+      .then(() => {
+        if (!spike.live) return
+        const tokens = tracker.activeTokens(nowS, 300)
+        return Promise.all([priceMoves.evaluate(tokens, nowS), smaCross.evaluate(tokens, nowS)])
+      })
       .catch((err) => logger.error({ err: String(err) }, 'detector tick failed'))
   }, cfg.evalIntervalS * 1000)
 
@@ -126,6 +134,7 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
         launches: launchpads.launches,
         graduations: launchpads.graduations,
         milestones: performance.milestonesEmitted,
+        smaCrosses: smaCross.alerts
       },
       'pipeline stats',
     )
