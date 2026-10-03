@@ -219,6 +219,31 @@ export function renderAlertHtml(alert: Alert): string {
       ].join('\n')
     }
 
+    case 'early_momentum': {
+      const head = `\u{1F680} ${title(alert)}`
+      const gainPct = (alert.gainPct * 100).toFixed(0)
+      const line = `<b>Early momentum</b> · +${gainPct}% over ${alert.candleCount}m · ${alert.greenCount}/${alert.candleCount} green · Robinhood`
+      const extra = `Volume ${fmtUsd(alert.volumeUsd)} vs prior avg ${fmtUsd(alert.avgPriorVolumeUsd)}`
+      return [
+        `${head}\n${line}`,
+        `${block(statLines(alert.context, [extra]))}${warning}`,
+        footer(alert, defaultLinks(alert.token)),
+      ].join('\n')
+    }
+
+    case 'coil_breakout': {
+      const head = `\u{1F4A5} ${title(alert)}`
+      const line = `<b>Coil breakout</b> · cleared coil by ${alert.clearancePct.toFixed(1)}% · ${fmtMult(
+        alert.volumeMultiple,
+      )} volume · Robinhood`
+      const extra = `Coil range ${alert.coilRangePct.toFixed(1)}% of price  Volume ${fmtUsd(alert.volumeUsd)}`
+      return [
+        `${head}\n${line}`,
+        `${block(statLines(alert.context, [extra]))}${warning}`,
+        footer(alert, defaultLinks(alert.token)),
+      ].join('\n')
+    }
+
     case 'liquidity_pull': {
       const head = `\u{1F6A8} <b>Liquidity pulled</b> ${title(alert)}`
       const line = `<b>-${alert.droppedPct.toFixed(1)}%</b> · ${fmtUsd(alert.beforeUsd)} to ${fmtUsd(
