@@ -209,6 +209,18 @@ export class Store {
     this.addColumn('minute_buckets', 'low_price', 'REAL NOT NULL DEFAULT 0')
     this.addColumn('minute_buckets', 'open_price', 'REAL NOT NULL DEFAULT 0')
 
+    // One-time backfill: these alert kinds were added after some chats
+    // already had a saved, non-empty kinds list. parseKinds() only falls
+    // back to the full defaults when the stored list is EMPTY, so an
+    // existing chat's old list never picks up a kind added later — it would
+    // stay invisible forever, not just off. Scoped to these exact, known-new
+    // kind names (never add a kind here that existed before this list did),
+    // so this can never silently re-enable something a user deliberately
+    // turned off — those kind names were always present in their row.
+    for (const kind of ['sma_cross', 'accumulation', 'early_momentum', 'coil_breakout'] as const) {
+      this.backfillKind(kind)
+    }
+
     // The pre-kind cooldown table carried spike cooldowns only.
     const legacy = this.db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'cooldowns'")
@@ -226,6 +238,25 @@ export class Store {
     const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
     if (!columns.some((c) => c.name === column)) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`)
+    }
+  }
+
+  /**
+   * Adds `kind` to every chat's stored kinds list that doesn't already
+   * mention it. Idempotent: safe to call on every startup, cheap for a
+   * personal bot's chat count. See the call site in the constructor for why
+   * this only runs for a fixed, known-new set of kind names.
+   */
+  private backfillKind(kind: string): void {
+    const rows = this.db.prepare('SELECT chat_id, kinds FROM chats').all() as { chat_id: string; kinds: string }[]
+    for (const row of rows) {
+      const current = row.kinds
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      if (current.includes(kind)) continue
+      current.push(kind)
+      this.db.prepare('UPDATE chats SET kinds = ? WHERE chat_id = ?').run(current.join(','), row.chat_id)
     }
   }
 
