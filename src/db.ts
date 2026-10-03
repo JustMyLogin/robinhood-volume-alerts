@@ -16,7 +16,15 @@ export interface MinuteBucket {
   swaps: number
   buys: number
   sells: number
+  /** Price of the first trade in the minute — never overwritten after that. */
+  openPrice: number
+  /** Price of the most recent trade in the minute — updated on every trade. */
   closePrice: number
+  /** Highest trade price seen within the minute. 0 on buckets written before
+   *  this field existed — treat 0 as "no range data", not a real price. */
+  highPrice: number
+  /** Lowest trade price seen within the minute. Same 0-means-unknown caveat. */
+  lowPrice: number
 }
 
 /** Cached classification of a v3-style pool. */
@@ -125,7 +133,10 @@ export class Store {
         swaps       INTEGER NOT NULL,
         buys        INTEGER NOT NULL,
         sells       INTEGER NOT NULL,
+        open_price  REAL NOT NULL DEFAULT 0,
         close_price REAL NOT NULL,
+        high_price  REAL NOT NULL DEFAULT 0,
+        low_price   REAL NOT NULL DEFAULT 0,
         PRIMARY KEY (token, minute)
       );
       CREATE INDEX IF NOT EXISTS idx_buckets_minute ON minute_buckets (minute);
@@ -194,6 +205,9 @@ export class Store {
     this.addColumn('chats', 'price_move_pct', 'REAL NOT NULL DEFAULT 25')
     this.addColumn('chats', 'rug_drop_pct', 'REAL NOT NULL DEFAULT 40')
     this.addColumn('tokens', 'graduated', 'INTEGER NOT NULL DEFAULT 0')
+    this.addColumn('minute_buckets', 'high_price', 'REAL NOT NULL DEFAULT 0')
+    this.addColumn('minute_buckets', 'low_price', 'REAL NOT NULL DEFAULT 0')
+    this.addColumn('minute_buckets', 'open_price', 'REAL NOT NULL DEFAULT 0')
 
     // The pre-kind cooldown table carried spike cooldowns only.
     const legacy = this.db
@@ -361,22 +375,38 @@ export class Store {
   addBucket(token: string, minute: number, b: MinuteBucket): void {
     this.db
       .prepare(
-        `INSERT INTO minute_buckets (token, minute, volume_usd, swaps, buys, sells, close_price)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO minute_buckets (token, minute, volume_usd, swaps, buys, sells, open_price, close_price, high_price, low_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (token, minute) DO UPDATE SET
            volume_usd = volume_usd + excluded.volume_usd,
            swaps = swaps + excluded.swaps,
            buys = buys + excluded.buys,
            sells = sells + excluded.sells,
-           close_price = excluded.close_price`,
+           -- open_price is the FIRST trade of the minute: keep the existing
+           -- value unless this row never had one recorded (legacy data).
+           open_price = CASE WHEN open_price <= 0 THEN excluded.open_price ELSE open_price END,
+           close_price = excluded.close_price,
+           high_price = MAX(high_price, excluded.high_price),
+           low_price = CASE WHEN low_price <= 0 THEN excluded.low_price ELSE MIN(low_price, excluded.low_price) END`,
       )
-      .run(token.toLowerCase(), minute, b.volumeUsd, b.swaps, b.buys, b.sells, b.closePrice)
+      .run(
+        token.toLowerCase(),
+        minute,
+        b.volumeUsd,
+        b.swaps,
+        b.buys,
+        b.sells,
+        b.openPrice,
+        b.closePrice,
+        b.highPrice,
+        b.lowPrice,
+      )
   }
 
   getBuckets(token: string, fromMinute: number, toMinute: number): Map<number, MinuteBucket> {
     const rows = this.db
       .prepare(
-        'SELECT minute, volume_usd, swaps, buys, sells, close_price FROM minute_buckets WHERE token = ? AND minute BETWEEN ? AND ?',
+        'SELECT minute, volume_usd, swaps, buys, sells, open_price, close_price, high_price, low_price FROM minute_buckets WHERE token = ? AND minute BETWEEN ? AND ?',
       )
       .all(token.toLowerCase(), fromMinute, toMinute) as {
       minute: number
@@ -384,7 +414,10 @@ export class Store {
       swaps: number
       buys: number
       sells: number
+      open_price: number
       close_price: number
+      high_price: number
+      low_price: number
     }[]
     const map = new Map<number, MinuteBucket>()
     for (const r of rows) {
@@ -393,7 +426,10 @@ export class Store {
         swaps: r.swaps,
         buys: r.buys,
         sells: r.sells,
+        openPrice: r.open_price,
         closePrice: r.close_price,
+        highPrice: r.high_price,
+        lowPrice: r.low_price,
       })
     }
     return map
@@ -646,6 +682,13 @@ export class Store {
   /** Marks a token as graduated so future polls skip it. */
   markGraduated(token: string): void {
     this.db.prepare('UPDATE tokens SET graduated = 1 WHERE token = ?').run(token.toLowerCase())
+  }
+
+  /** Every token with at least one stored minute bucket. Used by offline
+   *  tools (e.g. scripts/backtest.ts) that need to scan all known history. */
+  allTrackedTokens(): string[] {
+    const rows = this.db.prepare('SELECT DISTINCT token FROM minute_buckets').all() as { token: string }[]
+    return rows.map((r) => r.token)
   }
 
   // ---- cooldowns -----------------------------------------------------------
