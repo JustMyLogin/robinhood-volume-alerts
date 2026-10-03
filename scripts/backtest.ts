@@ -14,6 +14,7 @@
  * win rate and average forward return. This is a sanity check on a
  * strategy's historical hit rate, not a substitute for watching it live.
  */
+import { SETTING_DEFAULTS } from '../src/config.js'
 import { Store } from '../src/db.js'
 import { fillCandleWindow } from '../src/engine/strategy.js'
 import { STRATEGIES } from '../src/engine/strategies.js'
@@ -39,17 +40,11 @@ if (!strategy) {
   process.exit(1)
 }
 
-// Defaults here are unused for backtesting (no chats, no gating) but Store's
-// constructor needs them to seed its own settings-defaults table.
-const store = new Store(dbPath, {
-  spikeX: 3,
-  minVolumeUsd: 500,
-  minSwaps: 3,
-  newTokens: true,
-  whaleMinUsd: 5000,
-  priceMovePct: 25,
-  rugDropPct: 40,
-})
+// These defaults are unused for backtesting (no chats, no gating) but Store's
+// constructor needs a complete Defaults object to seed its own settings
+// table — reusing the app's real defaults is simplest and always matches
+// the Defaults type, whatever fields it happens to have.
+const store = new Store(dbPath, SETTING_DEFAULTS)
 
 const tokens = onlyToken ? [onlyToken] : store.allTrackedTokens()
 const scanTokens = limitTokens > 0 ? tokens.slice(0, limitTokens) : tokens
