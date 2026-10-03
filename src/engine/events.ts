@@ -10,6 +10,8 @@ export const ALERT_KINDS = [
   'performance',
   'sma_cross',
   'accumulation',
+  'early_momentum',
+  'coil_breakout',
 ] as const
 
 export type AlertKind = (typeof ALERT_KINDS)[number]
@@ -30,6 +32,8 @@ export const KIND_LABELS: Record<AlertKind, string> = {
   performance: 'Alert follow-ups',
   sma_cross: 'SMA9 crossover',
   accumulation: 'Accumulation warning',
+  early_momentum: 'Early momentum',
+  coil_breakout: 'Coil breakout',
 }
 
 /** One-line explanations shown in the alert-type panel. */
@@ -44,6 +48,8 @@ export const KIND_DESCRIPTIONS: Record<AlertKind, string> = {
   performance: 'a token you were alerted on hits 2x, 5x, 10x and beyond',
   sma_cross: 'price crosses above its 9-minute SMA on above-average volume',
   accumulation: 'buy pressure and volume building while price is still flat, a lead-up before a move',
+  early_momentum: 'sustained price gain with multiple green candles and volume holding up, even in a token\'s first minutes',
+  coil_breakout: 'a tight, flat price coil breaking out with a volume spike behind it',
 }
 
 /** Market context attached to every alert, each field degrading to null. */
@@ -155,6 +161,42 @@ export interface AccumulationAlert extends BaseAlert {
   windowMinutes: number
 }
 
+/**
+ * Sustained directional acceleration over a short window of one-minute
+ * candles: a real gain, most candles green, volume still holding up. Ported
+ * from an n8n Code node; ({@link https://docs.ponsfamily.com} unrelated —
+ * see src/engine/earlyMomentum.ts for the full strategy description).
+ */
+export interface EarlyMomentumAlert extends BaseAlert {
+  kind: 'early_momentum'
+  /** Fractional gain over the window, e.g. 0.4 = 40%. */
+  gainPct: number
+  /** How many of the window's candles closed green. */
+  greenCount: number
+  /** Total candles in the window (green + red). */
+  candleCount: number
+  /** Current candle's USD volume. */
+  volumeUsd: number
+  /** Average USD volume of the candles before the current one. */
+  avgPriorVolumeUsd: number
+}
+
+/**
+ * A tight, flat price coil breaking out with a volume spike confirming it.
+ * Ported from an n8n Code node; see src/engine/coilBreakout.ts for the full
+ * strategy description.
+ */
+export interface CoilBreakoutAlert extends BaseAlert {
+  kind: 'coil_breakout'
+  /** How far the close cleared the coil's prior high, as a percent of that high. */
+  clearancePct: number
+  /** Current candle's volume divided by the trailing 20-candle average volume. */
+  volumeMultiple: number
+  volumeUsd: number
+  /** The coil's average candle range, as a percent of its high — how tight it was. */
+  coilRangePct: number
+}
+
 /** Pooled liquidity dropped sharply: the rug early warning. */
 export interface LiquidityPullAlert extends BaseAlert {
   kind: 'liquidity_pull'
@@ -202,6 +244,8 @@ export type Alert =
   | PerformanceAlert
   | SmaCrossAlert
   | AccumulationAlert
+  | EarlyMomentumAlert
+  | CoilBreakoutAlert
 
 /**
  * Alerts that only concern a specific set of chats (rather than everyone who
@@ -235,5 +279,9 @@ export function fingerprint(alert: Alert): string {
       return `sma:${alert.token}:${Math.floor(alert.at / 1800)}`
     case 'accumulation':
       return `accum:${alert.token}:${Math.floor(alert.at / 3600)}`
+    case 'early_momentum':
+      return `momentum:${alert.token}:${Math.floor(alert.at / 1200)}`
+    case 'coil_breakout':
+      return `coil:${alert.token}:${Math.floor(alert.at / 900)}`
   }
 }
