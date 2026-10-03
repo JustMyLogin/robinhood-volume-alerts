@@ -46,7 +46,7 @@ export function escapeHtml(s: string): string {
   return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
-const LAUNCHPAD_LABELS: Record<string, string> = { noxa: 'NOXA', odyssey: 'The Odyssey' }
+const LAUNCHPAD_LABELS: Record<string, string> = { noxa: 'NOXA', odyssey: 'The Odyssey', pons: 'pons' }
 
 export function dexScreenerUrl(token: string): string {
   return `https://dexscreener.com/robinhood/${token}`
