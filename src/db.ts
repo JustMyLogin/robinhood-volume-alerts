@@ -41,6 +41,8 @@ export interface TokenRow {
   creator: string | null
   launchpad: string | null
   firstSeenS: number | null
+  /** Whether a launchpad-side graduation has been recorded for this token. */
+  graduated: boolean
 }
 
 /** A wallet or token a chat asked to follow. */
@@ -191,6 +193,7 @@ export class Store {
     this.addColumn('chats', 'whale_min_usd', 'REAL NOT NULL DEFAULT 5000')
     this.addColumn('chats', 'price_move_pct', 'REAL NOT NULL DEFAULT 25')
     this.addColumn('chats', 'rug_drop_pct', 'REAL NOT NULL DEFAULT 40')
+    this.addColumn('tokens', 'graduated', 'INTEGER NOT NULL DEFAULT 0')
 
     // The pre-kind cooldown table carried spike cooldowns only.
     const legacy = this.db
@@ -581,6 +584,7 @@ export class Store {
           creator: string | null
           launchpad: string | null
           first_seen_s: number | null
+          graduated: number
         }
       | undefined
     if (!row) return null
@@ -593,6 +597,7 @@ export class Store {
       creator: row.creator,
       launchpad: row.launchpad,
       firstSeenS: row.first_seen_s,
+      graduated: row.graduated === 1,
     }
   }
 
@@ -624,6 +629,23 @@ export class Store {
         launchpad: partial.launchpad ?? null,
         firstSeenS: partial.firstSeenS ?? null,
       })
+  }
+
+  /**
+   * Tokens on `launchpad` not yet marked graduated. Used by graduation
+   * pollers (e.g. pons, which has no on-chain graduation event) to know
+   * which tokens are still worth checking.
+   */
+  listUngraduatedByLaunchpad(launchpad: string): string[] {
+    const rows = this.db
+      .prepare('SELECT token FROM tokens WHERE launchpad = ? AND graduated = 0')
+      .all(launchpad) as { token: string }[]
+    return rows.map((r) => r.token)
+  }
+
+  /** Marks a token as graduated so future polls skip it. */
+  markGraduated(token: string): void {
+    this.db.prepare('UPDATE tokens SET graduated = 1 WHERE token = ?').run(token.toLowerCase())
   }
 
   // ---- cooldowns -----------------------------------------------------------
