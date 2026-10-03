@@ -57,19 +57,29 @@ export class VolumeTracker {
     }
     const bucket = buckets.get(minute)
     if (!bucket) {
+      // This is the first trade of the minute: it sets open, close, high and
+      // low all at once. open is never touched again below — only close,
+      // high and low move as more trades land in the same minute.
       buckets.set(minute, {
         volumeUsd: trade.volumeUsd,
         swaps: 1,
         buys: trade.isBuy ? 1 : 0,
         sells: trade.isBuy ? 0 : 1,
+        openPrice: trade.priceUsd,
         closePrice: trade.priceUsd,
+        highPrice: trade.priceUsd,
+        lowPrice: trade.priceUsd,
       })
     } else {
       bucket.volumeUsd += trade.volumeUsd
       bucket.swaps += 1
       if (trade.isBuy) bucket.buys += 1
       else bucket.sells += 1
-      if (trade.priceUsd > 0) bucket.closePrice = trade.priceUsd
+      if (trade.priceUsd > 0) {
+        bucket.closePrice = trade.priceUsd
+        if (trade.priceUsd > bucket.highPrice) bucket.highPrice = trade.priceUsd
+        if (bucket.lowPrice <= 0 || trade.priceUsd < bucket.lowPrice) bucket.lowPrice = trade.priceUsd
+      }
     }
   }
 
