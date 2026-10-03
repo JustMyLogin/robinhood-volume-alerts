@@ -11,7 +11,13 @@ import { LaunchTracker } from './chain/launches.js'
 import { Enricher } from './chain/enrich.js'
 import { VolumeTracker } from './engine/window.js'
 import { SpikeDetector, type EmitAlert } from './engine/detector.js'
-import { LaunchpadDetectors, LiquidityMonitor, PriceMoveDetector, TradeDetectors } from './engine/detectors.js'
+import {
+  LaunchpadDetectors,
+  LiquidityMonitor,
+  PonsGraduationMonitor,
+  PriceMoveDetector,
+  TradeDetectors,
+} from './engine/detectors.js'
 import { PerformanceTracker } from './engine/performance.js'
 import type { Alert } from './engine/events.js'
 import { TelegramAlertBot } from './telegram/bot.js'
@@ -69,6 +75,7 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
   const launchpads = new LaunchpadDetectors(client, store, meta, emit)
   const smaCross = new SmaCrossDetector(store, meta, enricher, emit)
   const accumulation = new AccumulationDetector(store, meta, enricher, emit)
+  const ponsGraduations = new PonsGraduationMonitor(client, store, meta, emit)
 
   const head = await client.public.getBlockNumber()
   const backfillBlocks = BigInt(cfg.backfillMinutes) * BLOCKS_PER_MINUTE
@@ -123,6 +130,7 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
     if (!spike.live) return
     void liquidity.poll().catch((err) => logger.warn({ err: String(err) }, 'liquidity poll failed'))
     void performance.poll().catch((err) => logger.warn({ err: String(err) }, 'performance poll failed'))
+    void ponsGraduations.poll().catch((err) => logger.warn({ err: String(err) }, 'pons graduation poll failed'))
   }, 60_000)
 
   const statsTimer = setInterval(() => {
@@ -140,6 +148,7 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
         milestones: performance.milestonesEmitted,
         smaCrosses: smaCross.alerts,
         accumulations: accumulation.alerts,
+        ponsGraduations: ponsGraduations.alerts,
       },
       'pipeline stats',
     )
