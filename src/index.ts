@@ -25,6 +25,8 @@ import { renderAlertHtml } from './telegram/format.js'
 import { logger } from './logger.js'
 import { SmaCrossDetector } from './engine/smaCross.js'
 import { AccumulationDetector } from './engine/accumulation.js'
+import { EarlyMomentumDetector } from './engine/earlyMomentum.js'
+import { CoilBreakoutDetector } from './engine/coilBreakout.js'
 
 /** Blocks per minute at the chain's ~100ms cadence, used to size the backfill. */
 const BLOCKS_PER_MINUTE = 600n
@@ -75,6 +77,8 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
   const launchpads = new LaunchpadDetectors(client, store, meta, emit)
   const smaCross = new SmaCrossDetector(store, meta, enricher, emit)
   const accumulation = new AccumulationDetector(store, meta, enricher, emit)
+  const earlyMomentum = new EarlyMomentumDetector(store, meta, enricher, emit)
+  const coilBreakout = new CoilBreakoutDetector(store, meta, enricher, emit)
   const ponsGraduations = new PonsGraduationMonitor(client, store, meta, emit)
 
   const head = await client.public.getBlockNumber()
@@ -121,6 +125,8 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
           priceMoves.evaluate(tokens, nowS),
           smaCross.evaluate(tokens, nowS),
           accumulation.evaluate(tokens, nowS),
+          earlyMomentum.evaluate(tokens, nowS),
+          coilBreakout.evaluate(tokens, nowS),
         ])
       })
       .catch((err) => logger.error({ err: String(err) }, 'detector tick failed'))
@@ -148,6 +154,8 @@ export async function startApp(overrides: Partial<ReturnType<typeof loadConfig>>
         milestones: performance.milestonesEmitted,
         smaCrosses: smaCross.alerts,
         accumulations: accumulation.alerts,
+        earlyMomentums: earlyMomentum.alerts,
+        coilBreakouts: coilBreakout.alerts,
         ponsGraduations: ponsGraduations.alerts,
       },
       'pipeline stats',
