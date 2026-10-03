@@ -621,6 +621,14 @@ export class TelegramAlertBot {
         // Same reasoning as sma_cross: the detector's own thresholds (buy ratio,
         // volume trend, baseline comparison) already do the filtering.
         return true
+      case 'early_momentum':
+        // Same reasoning again: gain/green-count/volume-sustain are already
+        // enforced inside earlyMomentumStrategy.evaluate() before this ever fires.
+        return true
+      case 'coil_breakout':
+        // Same reasoning again: tightness/flatness/clearance/volume are already
+        // enforced inside coilBreakoutStrategy.evaluate() before this ever fires.
+        return true
       case 'launch':
       case 'graduation':
       case 'wallet_trade':
