@@ -1,5 +1,6 @@
 import { erc20Abi, MAINNET_ADDRESSES, watchGraduations, watchLaunches, type HoodClient } from 'hoodchain'
 import type { Address } from 'viem'
+import { PONS_ACTIVE_FACTORY, ponsGraduationStatusAbi, ponsTokenLaunchedEvent } from '../chain/pons.js'
 import type { Enricher } from '../chain/enrich.js'
 import type { EthPrice } from '../chain/eth-price.js'
 import type { Trade } from '../chain/ingest.js'
@@ -12,7 +13,7 @@ import type { EmitAlert } from './detector.js'
 import { EMPTY_CONTEXT } from './events.js'
 import { isNewToken } from './tokenAge.js'
 
-const LAUNCHPAD_LABELS: Record<string, string> = { noxa: 'NOXA', odyssey: 'The Odyssey' }
+const LAUNCHPAD_LABELS: Record<string, string> = { noxa: 'NOXA', odyssey: 'The Odyssey', pons: 'pons' }
 
 /**
  * Trade-level detectors: single large trades, and trades by wallets someone
@@ -319,10 +320,92 @@ export class LiquidityMonitor {
 }
 
 /**
- * Launchpad detector: new tokens on NOXA and The Odyssey, and Odyssey curves
- * that fill and migrate to a locked Uniswap v3 pool. Both also write the
- * creator / launchpad / first-seen facts that every other card's "Age",
+ * pons graduation poller.
+ *
+ * pons has no on-chain graduation event — trading just continues in the
+ * same pool once enough WETH is paired into the locked position — so this
+ * is a poll, not a watch. Every 60s it batches one multicall of
+ * `graduationStatus(token)` across every pons-launched token not yet marked
+ * graduated in the tokens table. A `true` result emits a graduation alert
+ * and marks the token so it is never checked again.
+ *
+ * The candidate set shrinks over time as tokens graduate or die out, so this
+ * never grows unbounded the way a naive "poll everything" approach would.
+ */
+export class PonsGraduationMonitor {
+  alerts = 0
+
+  constructor(
+    private readonly client: HoodClient,
+    private readonly store: Store,
+    private readonly meta: TokenMetaCache,
+    private readonly emit: EmitAlert,
+  ) {}
+
+  async poll(): Promise<void> {
+    const candidates = this.store.listUngraduatedByLaunchpad('pons')
+    if (candidates.length === 0) return
+
+    const results = await this.client.public.multicall({
+      contracts: candidates.map((token) => ({
+        address: PONS_ACTIVE_FACTORY,
+        abi: [ponsGraduationStatusAbi],
+        functionName: 'graduationStatus' as const,
+        args: [token as Address] as const,
+      })),
+      allowFailure: true,
+    })
+
+    for (let i = 0; i < results.length; i++) {
+      const token = candidates[i]
+      const res = results[i]
+      if (!token || !res || res.status !== 'success') continue
+      const [, , graduated] = res.result as [bigint, bigint, boolean]
+      if (!graduated) continue
+
+      this.store.markGraduated(token)
+      try {
+        await this.emitGraduation(token)
+      } catch (error) {
+        logger.warn({ token, err: String(error) }, 'pons graduation alert failed')
+      }
+    }
+  }
+
+  private async emitGraduation(token: string): Promise<void> {
+    const at = Math.floor(Date.now() / 1000)
+    const identity = await this.meta.get(token as Address)
+    const row = this.store.getToken(token)
+    const pool = this.store.poolsForTokens([token])[0]?.pool ?? null
+    this.alerts++
+    await this.emit({
+      kind: 'graduation',
+      token,
+      symbol: identity.symbol,
+      name: identity.name,
+      at,
+      context: {
+        ...EMPTY_CONTEXT,
+        launchpad: 'pons',
+        ageS: row?.firstSeenS != null ? at - row.firstSeenS : null,
+      },
+      pool: pool ?? token,
+    })
+  }
+}
+
+/**
+ * Launchpad detector: new tokens on NOXA, The Odyssey, and pons, and Odyssey
+ * curves that fill and migrate to a locked Uniswap v3 pool. All three write
+ * the creator / launchpad / first-seen facts that every other card's "Age",
  * "Platform", and "dev sold" fields read.
+ *
+ * NOXA and Odyssey are watched via the `hoodchain` package's own
+ * `watchLaunches`/`watchGraduations`. pons predates that package's launchpad
+ * support, so its `TokenLaunched` event is watched directly here using the
+ * event signature and factory address from docs.ponsfamily.com. pons
+ * graduation is handled separately by {@link PonsGraduationMonitor}, since
+ * pons has no graduation event to watch.
  *
  * Not age-restricted: a launch is by definition brand new, and a graduation
  * is reporting on that same token's lifecycle, not a fresh market signal to
@@ -369,6 +452,25 @@ export class LaunchpadDetectors {
         },
         { onError: (err) => logger.warn({ err: String(err) }, 'graduation watcher error') },
       ),
+    )
+    this.stops.push(
+      this.client.public.watchEvent({
+        address: PONS_ACTIVE_FACTORY,
+        event: ponsTokenLaunchedEvent,
+        onLogs: (logs) => {
+          for (const log of logs) {
+            const token = (log.args.token as string).toLowerCase()
+            const deployer = (log.args.deployer as string).toLowerCase()
+            const pool = (log.args.pool as string | undefined)?.toLowerCase() ?? null
+            const at = Math.floor(Date.now() / 1000)
+            this.store.upsertToken({ token, creator: deployer, launchpad: 'pons', firstSeenS: at })
+            void this.emitLaunch(token, deployer, pool, 'pons', at).catch((error) =>
+              logger.warn({ err: String(error) }, 'pons launch alert failed'),
+            )
+          }
+        },
+        onError: (err) => logger.warn({ err: String(err) }, 'pons launch watcher error'),
+      }),
     )
   }
 
